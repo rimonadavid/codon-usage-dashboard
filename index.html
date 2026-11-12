@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codon Usage Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f2f5f7;--panel:#fff;--ink:#14232e;--mute:#5d6f7b;--line:#d5dde2;--a:#0e7c86;--b:#d9702a;--heat:14,124,134}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1a21;--panel:#16252e;--ink:#e6eef2;--mute:#93a6b2;--line:#2a3d48;--a:#3cc1cc;--b:#f09a5b;--heat:60,193,204}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:28px clamp(16px,4vw,48px) 8px}
+h1{margin:0;font:700 clamp(24px,4vw,36px)/1.15 Georgia,"Times New Roman",serif;letter-spacing:-.01em}
+header p{margin:6px 0 0;color:var(--mute);max-width:70ch}
+main{padding:16px clamp(16px,4vw,48px) 48px;display:grid;gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+h2{margin:0 0 12px;font-size:16px}
+.controls{display:flex;flex-wrap:wrap;gap:14px;align-items:end}
+label{display:grid;gap:4px;font-size:13px;color:var(--mute)}
+select,textarea,button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+button{cursor:pointer;background:var(--a);color:#fff;border-color:var(--a);font-weight:600}
+button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+:focus-visible{outline:2px solid var(--b);outline-offset:2px}
+.seg{display:flex}.seg button{border-radius:0;background:transparent;color:var(--ink);border-color:var(--line)}
+.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button[aria-pressed=true]{background:var(--a);color:#fff;border-color:var(--a)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.stat b{display:block;font:700 26px/1.2 Georgia,serif}.stat span{color:var(--mute);font-size:13px}
+.grid{display:grid;grid-template-columns:28px repeat(4,1fr);gap:6px;min-width:640px}
+.hd{text-align:center;font-weight:700;color:var(--mute);align-self:center}
+.box{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.c{display:grid;grid-template-columns:38px 1fr auto;gap:4px;padding:3px 8px;font:12.5px ui-monospace,Menlo,Consolas,monospace;cursor:pointer;border:0;width:100%;text-align:left;border-radius:0;color:var(--ink)}
+.c.dim{opacity:.25}.c.sel{outline:2px solid var(--b);outline-offset:-2px}
+.c em{font-style:normal;color:var(--mute)}
+.scroll{overflow-x:auto}
+.chartbox{position:relative;height:380px}
+textarea{width:100%;min-height:90px;font:12.5px ui-monospace,Menlo,Consolas,monospace}
+.note{color:var(--mute);font-size:13px;margin:8px 0 0}
+footer{padding:0 clamp(16px,4vw,48px) 32px;color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Codon Usage Dashboard</h1>
+  <p>Explore how organisms choose between synonymous codons. Compare species, inspect the codon table as a heatmap, or paste your own coding sequence.</p>
+</header>
+<main>
+  <section class="panel">
+    <div class="controls">
+      <label>Organism A<select id="selA"></select></label>
+      <label>Compare with<select id="selB"></select></label>
+      <label>Amino acid<select id="selAA"></select></label>
+      <div><div class="note" style="margin:0 0 4px">Metric</div>
+        <div class="seg" role="group" aria-label="Metric">
+          <button id="mFreq" aria-pressed="true">Per thousand</button>
+          <button id="mRscu" aria-pressed="false">RSCU</button>
+        </div></div>
+      <button class="ghost" id="csv">Download CSV</button>
+    </div>
+  </section>
+
+  <section class="panel stats" id="stats" aria-live="polite"></section>
+
+  <section class="panel">
+    <h2>Codon table heatmap <span style="font-weight:400;color:var(--mute)">(organism A; click a codon to filter by its amino acid)</span></h2>
+    <div class="scroll"><div class="grid" id="table"></div></div>
+  </section>
+
+  <section class="panel">
+    <h2 id="chartTitle">Codon usage</h2>
+    <div class="chartbox"><canvas id="chart" role="img" aria-label="Bar chart of codon usage"></canvas></div>
+    <p class="note">RSCU (relative synonymous codon usage) is a codon's frequency divided by the mean frequency of its synonymous codons. Values above 1 mean the codon is preferred.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Analyze your own sequence</h2>
+    <label>Paste DNA (FASTA or plain A/C/G/T). Read in frame 1.
+      <textarea id="seq" placeholder="ATGGCTAAAGGT..."></textarea></label>
+    <div class="controls" style="margin-top:10px">
+      <button id="go">Calculate usage</button>
+      <button class="ghost" id="demo">Load example</button>
+    </div>
+    <p class="note" id="seqMsg">Your result is added as "My sequence" in both organism menus.</p>
+  </section>
+</main>
+<footer>Reference frequencies are approximate per-thousand values for standard genetic code organisms (based on Kazusa Codon Usage Database figures). Replace the numbers in <code>DATA</code> with exact values if you need them.</footer>
+
+<script>
+const B="TCAG", AA="FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG";
+const NAMES={A:"Alanine",R:"Arginine",N:"Asparagine",D:"Aspartate",C:"Cysteine",Q:"Glutamine",E:"Glutamate",G:"Glycine",H:"Histidine",I:"Isoleucine",L:"Leucine",K:"Lysine",M:"Methionine",F:"Phenylalanine",P:"Proline",S:"Serine",T:"Threonine",W:"Tryptophan",Y:"Tyrosine",V:"Valine","*":"Stop"};
+const CODONS=[];for(let i=0;i<4;i++)for(let j=0;j<4;j++)for(let k=0;k<4;k++)CODONS.push(B[i]+B[j]+B[k]);
+// per-thousand frequencies, codons in TCAG order (TTT,TTC,TTA,TTG,TCT,...)
+const DATA={
+ecoli:{name:"E. coli K-12",f:[22.1,16.0,14.3,13.0,10.4,9.1,8.9,8.5,17.5,12.2,2.0,0.3,5.2,6.1,1.0,13.9,11.0,11.0,3.9,52.6,7.0,5.5,8.4,23.2,12.9,9.7,15.4,28.9,20.9,22.0,3.6,5.4,30.4,25.0,4.4,27.8,8.9,23.4,7.1,14.4,17.7,21.7,33.6,10.3,8.8,16.0,2.1,1.2,18.3,15.3,10.9,26.3,15.3,25.6,20.2,33.7,32.2,19.1,39.5,17.8,24.8,29.6,8.0,11.1]},
+human:{name:"Homo sapiens",f:[17.6,20.3,7.7,12.9,15.2,17.7,12.2,4.4,12.2,15.3,1.0,0.8,10.6,12.6,1.6,13.2,13.2,19.6,7.2,39.6,17.5,19.8,16.9,6.9,10.9,15.1,12.3,34.2,4.5,10.4,6.2,11.4,16.0,20.8,7.5,22.0,13.1,18.9,15.1,6.1,17.0,19.1,24.4,31.9,12.1,19.5,12.2,12.0,11.0,14.5,7.1,28.1,18.4,27.7,15.8,7.4,21.8,25.1,29.0,39.6,10.8,22.2,16.5,16.5]},
+yeast:{name:"S. cerevisiae",f:[26.1,18.4,26.2,27.2,23.5,14.2,18.7,8.6,18.8,14.8,1.1,0.5,8.1,4.8,0.7,10.4,12.3,5.4,13.4,10.5,13.5,6.8,18.3,5.3,13.6,7.8,27.3,12.1,6.4,2.6,3.0,1.7,30.1,17.2,17.8,20.9,20.3,12.7,17.8,8.0,35.7,24.8,41.9,30.8,14.2,9.8,21.3,9.2,22.1,11.8,11.8,10.8,21.2,12.6,16.2,6.2,37.6,20.2,45.6,19.2,23.9,9.8,10.9,6.0]}
+};
+const $=id=>document.getElementById(id);
+let st={A:"ecoli",B:"human",aa:"ALL",metric:"freq"},chart;
+
+function rscu(f){const s={},n={};f.forEach((v,i)=>{const a=AA[i];s[a]=(s[a]||0)+v;n[a]=(n[a]||0)+1});return f.map((v,i)=>{const m=s[AA[i]]/n[AA[i]];return m?v/m:0})}
+function vals(key){const f=DATA[key].f;return st.metric==="freq"?f:rscu(f)}
+const fmt=v=>st.metric==="freq"?v.toFixed(1):v.toFixed(2);
+
+function fillSelects(){
+  const opts=Object.keys(DATA).map(k=>`<option value="${k}">${DATA[k].name}</option>`).join("");
+  $("selA").innerHTML=opts;$("selB").innerHTML='<option value="none">None</option>'+opts;
+  $("selA").value=st.A;$("selB").value=st.B;
+  $("selAA").innerHTML='<option value="ALL">All amino acids</option>'+Object.keys(NAMES).sort((x,y)=>NAMES[x].localeCompare(NAMES[y])).map(a=>`<option value="${a}">${NAMES[a]} (${a==="*"?"Stop":a})</option>`).join("");
+  $("selAA").value=st.aa;
+}
+
+function renderStats(){
+  const f=DATA[st.A].f,tot=f.reduce((a,b)=>a+b,0);
+  const gc3=f.reduce((s,v,i)=>s+("GC".includes(CODONS[i][2])?v:0),0)/tot*100;
+  const sense=f.map((v,i)=>[v,i]).filter(([v,i])=>AA[i]!=="*"&&v>0).sort((a,b)=>b[0]-a[0]);
+  const top=sense[0],low=sense[sense.length-1];
+  $("stats").innerHTML=[
+    [gc3.toFixed(1)+"%","GC content at third position (GC3)"],
+    [CODONS[top[1]]+" ("+AA[top[1]]+")","Most used codon, "+top[0].toFixed(1)+" per thousand"],
+    [CODONS[low[1]]+" ("+AA[low[1]]+")","Rarest codon, "+low[0].toFixed(1)+" per thousand"],
+    [DATA[st.A].name,"Total "+tot.toFixed(0)+" per thousand (all 64 codons)"]
+  ].map(([b,s])=>`<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+}
+
+function renderTable(){
+  const v=vals(st.A),max=Math.max(...v);let h='<div></div>'+[...B].map(b=>`<div class="hd">${b}</div>`).join("");
+  for(let i=0;i<4;i++){h+=`<div class="hd">${B[i]}</div>`;
+    for(let j=0;j<4;j++){h+='<div class="box">';
+      for(let k=0;k<4;k++){const n=16*i+4*j+k,a=AA[n],al=(v[n]/max*.8).toFixed(2);
+        h+=`<button class="c ${st.aa!=="ALL"&&st.aa!==a?"dim":""} ${st.aa===a?"sel":""}" style="background:rgba(var(--heat),${al})" data-aa="${a}" title="${CODONS[n]} → ${NAMES[a]}: ${fmt(v[n])}"><span>${CODONS[n]}</span><em>${a}</em><span>${fmt(v[n])}</span></button>`}
+      h+='</div>'}}
+  $("table").innerHTML=h;
+  $("table").querySelectorAll(".c").forEach(b=>b.onclick=()=>{st.aa=st.aa===b.dataset.aa?"ALL":b.dataset.aa;$("selAA").value=st.aa;render()});
+}
+
+function renderChart(){
+  const idx=CODONS.map((_,i)=>i).filter(i=>st.aa==="ALL"||AA[i]===st.aa)
+    .sort((x,y)=>AA[x]===AA[y]?CODONS[x].localeCompare(CODONS[y]):AA[x].localeCompare(AA[y]));
+  const css=getComputedStyle(document.documentElement),col=n=>css.getPropertyValue(n).trim();
+  const ds=[{label:DATA[st.A].name,data:vals(st.A),c:col("--a")}];
+  if(st.B!=="none")ds.push({label:DATA[st.B].name,data:vals(st.B),c:col("--b")});
+  Chart.defaults.color=col("--mute");Chart.defaults.borderColor=col("--line");
+  if(chart)chart.destroy();
+  chart=new Chart($("chart"),{type:"bar",data:{labels:idx.map(i=>`${CODONS[i]} ${AA[i]}`),
+    datasets:ds.map(d=>({label:d.label,data:idx.map(i=>d.data[i]),backgroundColor:d.c}))},
+    options:{maintainAspectRatio:false,scales:{y:{title:{display:true,text:st.metric==="freq"?"Frequency per thousand codons":"RSCU"},beginAtZero:true},x:{ticks:{maxRotation:90,minRotation:60,font:{size:10}}}}}});
+  $("chartTitle").textContent=(st.aa==="ALL"?"All codons":NAMES[st.aa]+" codons")+" — "+(st.metric==="freq"?"frequency per thousand":"relative synonymous codon usage");
+}
+
+function render(){renderStats();renderTable();renderChart();
+  $("mFreq").setAttribute("aria-pressed",st.metric==="freq");$("mRscu").setAttribute("aria-pressed",st.metric==="rscu")}
+
+function analyze(){
+  const s=$("seq").value.replace(/^>.*$/gm,"").toUpperCase().replace(/U/g,"T").replace(/[^ACGT]/g,"");
+  const counts=new Array(64).fill(0);let n=0;
+  for(let p=0;p+3<=s.length;p+=3){const i=CODONS.indexOf(s.slice(p,p+3));counts[i]++;n++}
+  if(n<30){$("seqMsg").textContent="Enter at least 30 codons (90 bases) of A, C, G and T.";return}
+  DATA.custom={name:"My sequence",f:counts.map(c=>c/n*1000)};
+  st.A="custom";fillSelects();render();
+  $("seqMsg").textContent=`Analyzed ${n} codons. Shown as organism A.`;
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+$("selA").onchange=e=>{st.A=e.target.value;render()};
+$("selB").onchange=e=>{st.B=e.target.value;render()};
+$("selAA").onchange=e=>{st.aa=e.target.value;render()};
+$("mFreq").onclick=()=>{st.metric="freq";render()};
+$("mRscu").onclick=()=>{st.metric="rscu";render()};
+$("go").onclick=analyze;
+$("demo").onclick=()=>{let s="ATG";const r=DATA.ecoli.f;const pool=[];CODONS.forEach((c,i)=>{if(AA[i]!=="*")for(let k=0;k<Math.round(r[i]);k++)pool.push(c)});let x=7;for(let i=0;i<300;i++){x=(x*1103515245+12345)%2147483648;s+=pool[x%pool.length]}$("seq").value=s+"TAA"};
+$("csv").onclick=()=>{const f=DATA[st.A].f,r=rscu(f);
+  const rows=["codon,amino_acid,per_thousand,rscu"].concat(CODONS.map((c,i)=>`${c},${AA[i]},${f[i].toFixed(2)},${r[i].toFixed(3)}`));
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.join("\n")],{type:"text/csv"}));a.download="codon_usage.csv";a.click()};
+matchMedia("(prefers-color-scheme:dark)").addEventListener("change",render);
+fillSelects();render();
+</script>
+</body>
+</html>
